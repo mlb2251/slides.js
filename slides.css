@@ -1,0 +1,31 @@
+canvas {
+    border: 1px solid black;
+    border-radius: 5px;
+}
+.thumbnail {
+    margin: 1px;
+    border: 1px solid gray;
+    border-radius: 5px;
+}
+#columns {
+    display: flex;
+    margin: 20px
+}
+#thumbnails {
+    width: 200;
+    margin-right: 10px;
+}
+#slides-with-notes {
+    flex: 1 /* take up all remaining space */
+}
+#notes-textarea {
+    width: 100%;
+    height: 200px;
+    font-family: "Arial";
+    font-size: 16px;
+    resize: vertical;
+    margin-top: 5px;
+}
+#slide-background {
+    stroke: black
+}
