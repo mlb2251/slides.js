@@ -1,12 +1,12 @@
 "use strict";
 
 const aspect_ratio = 9 / 16
-const WIDTH = 1000
+const WIDTH = 1000 // 10.4 inches
 const HEIGHT = WIDTH * aspect_ratio
 const THUMBNAIL_WIDTH = 200
 const THUMBNAIL_HEIGHT = THUMBNAIL_WIDTH * aspect_ratio
 
-let slide = undefined
+let slide_container = undefined
 let active_transitions = 0
 let config = {
     tracing_animation: false,
@@ -20,15 +20,28 @@ let trace_idx = 0
 let anim_interval = undefined
 
 function select(path) {
-    return slide.select(path)
+    return slide_container.select(path)
 }
 
-function append(path) {
-    return getForeground().append(path)
+function append(type) {
+    // parse up to first space (or end of string)
+    const entries = type.split(" ")
+    const name = entries[0]
+    const new_selection = getForeground().append(name)
+    entries.slice(1).forEach(entry => {
+        if (entry[0] == "#") {
+            new_selection.attr("id", entry.slice(1))
+        } else {
+            const [key, value] = entry.split("=")
+            new_selection.attr(key, value)    
+        }
+    })
+
+    return new_selection
 }
 
 function getSlide() {
-    return slide
+    return slide_container
 }
 
 const getBackground = () => select("#slide-background")
@@ -47,11 +60,11 @@ function createSlideLayout() {
     slides_with_notes.setAttribute("id", "slides-with-notes");
     columns.appendChild(slides_with_notes);
 
-    const slide_container = document.createElement("div");
-    slide_container.setAttribute("id", "slide-container");
-    slides_with_notes.appendChild(slide_container);
+    const div_slide_container = document.createElement("div");
+    div_slide_container.setAttribute("id", "slide-container");
+    slides_with_notes.appendChild(div_slide_container);
 
-    const svg = d3.select(slide_container).append("svg")
+    const svg = d3.select(div_slide_container).append("svg")
         .attr("viewBox", `0 0 ${WIDTH} ${HEIGHT}`)
 
     const active_slide = svg.append("g")
@@ -72,9 +85,19 @@ function createSlideLayout() {
     notes.appendChild(textarea);
 
 
-    slide = d3.select(slide_container)
+    slide_container = d3.select(div_slide_container)
+    override_selections()
     override_transitions()
 
+}
+
+
+function override_selections() {
+    d3.select().__proto__.bbox = function (callback) {
+        if (!callback)
+            return this.node().getBBox()
+        callback(this.node().getBBox())
+    }
 }
 
 // override how transitions work
