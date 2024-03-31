@@ -13,12 +13,12 @@ let config = {
 }
 let state = {}
 const anim_queue = []
-const trace = []
-const frames = []
+// const trace = []
+// const frames = []
 const slides = []
 let slide_idx = 0
 let frame_idx = 0
-let trace_idx = 0
+let anim_idx = 0
 let anim_interval = undefined
 
 function select(path) {
@@ -180,32 +180,40 @@ function slidenum() {
     select("#slidenum").remove()
     select("svg").append("text")
         .attr("id", "slidenum")
-        .text(`Slide ${slide_idx} / Frame ${frame_idx} / Trace ${trace_idx}`)
+        .text(`Slide ${slide_idx} / Frame ${frame_idx} / Anim ${anim_idx}`)
         .attr("x", WIDTH - 20)
         .attr("y", 35)
         .attr("text-anchor", "end")
         .attr("font-size", 24)
 }
 
-function load(i) {
-    if (i >= slides.length)
-        return
-    slide_idx = i
-    load_frame(slides[slide_idx])
-}
 
-function load_frame(i) {
-    frame_idx = i
-    trace_idx = frames[i]
-    load_slide(trace[trace_idx])
+function load(slide, frame = 0, no_anim = false) {
+    clearInterval(anim_interval)
+    slide_idx = slide
+    frame_idx = frame
+    const f = slides[slide_idx].frames[frame_idx]
+    anim_idx = 0
+
+    if (no_anim && f.anims.length != 0) {
+        // show the very last frame
+        anim_idx = f.anims.length-1
+        restore_slide(f.anims[anim_idx].slide_end)
+    } else {
+        // show the first frame, and launch the anims
+        restore_slide(f.slide)
+        if (f.anims.length != 0) {
+            anim_interval = setInterval(run_anim_if_ready, 50)
+            run_anim_if_ready()  
+        }
+    }
     slidenum()
-    anim_interval = setInterval(run_anim_if_ready, 50)
 }
 
-function load_slide(entry) {
+function restore_slide(svg_string) {
     select("svg").remove()
-    let new_active_slide = new DOMParser().parseFromString(entry.slide, "image/svg+xml");
-    getSlide().node().appendChild(new_active_slide.documentElement)
+    let new_active_slide = new DOMParser().parseFromString(svg_string, "image/svg+xml").documentElement;
+    getSlide().node().appendChild(new_active_slide)
     // curr_slide = entry.slide.clone(true).style("display", null).attr("id", "active-slide") // make it visible again
 }
 function save_slide() {
@@ -216,32 +224,41 @@ function save_slide() {
 function save_state() {
     return structuredClone(state)
 }
-function load_state(s) {
+function restore_state(s) {
     state = structuredClone(s)
 }
 
 function next_frame() {
-    if (frame_idx < frames.length - 1)
-        load_frame(frame_idx + 1)
+    if (frame_idx < slides[slide_idx].frames.length - 1)
+        return load(slide_idx, frame_idx + 1) // load next frame
+    if (slide_idx < slides.length - 1)
+        return load(slide_idx + 1, 0) // load next slide
 }
 function prev_frame() {
     if (frame_idx > 0)
-        load_frame(frame_idx - 1)
+        return load(slide_idx, frame_idx - 1, true) // load previous frame
+    if (slide_idx > 0)
+        return load(slide_idx - 1, slides[slide_idx - 1].frames.length - 1, true) // load previous slide
 }
 
 function run_anim_if_ready() {
-    if (active_transitions != 0)
-        return // wait for all transitions to finish
-    if (trace_idx + 1 > trace.length - 1 || trace[trace_idx + 1].type != "animate") {
-        // no anim next - we're safe to disable the check until next load()
+    const f = slides[slide_idx].frames[frame_idx]
+    if (anim_idx >= f.anims.length) {
+        // no more anims to run
         clearInterval(anim_interval)
         return
     }
 
-    trace_idx += 1
+    const next_anim = f.anims[anim_idx]
+
+    if (next_anim.block && active_transitions != 0)
+        return // wait for all transitions to finish
+
+    // we're good to go
+    anim_idx += 1
     slidenum()
-    state = load_state(trace[trace_idx].state)
-    trace[trace_idx].anim()
+    state = restore_state(next_anim.state)
+    next_anim.anim()
 }
 
 d3.select("body").on("keydown", function (e) {
@@ -252,30 +269,6 @@ d3.select("body").on("keydown", function (e) {
         prev_frame()
     }
 })
-
-// function make_thumbnail_canvas(svg_string) {
-//     const this_frame_idx = frames.length
-//     const canvas = d3.select("#thumbnails").append("canvas")
-//         .classed("thumbnail", true)
-//         .attr("width", THUMBNAIL_WIDTH)
-//         .attr("height", THUMBNAIL_HEIGHT)
-//         .attr("style", "margin: 1px")
-//         .on("click", function () {
-//             load(this_frame_idx)
-//         })
-    
-//     const ctx = canvas.node().getContext("2d")
-//     const DOMURL = self.URL || self.webkitURL || self;
-//     const svg = new Blob([svg_string], { type: "image/svg+xml;charset=utf-8" });
-//     const url = DOMURL.createObjectURL(svg)
-//     const img = new Image();
-//     img.onload = function () {
-//         ctx.drawImage(img, 0, 0, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
-//         DOMURL.revokeObjectURL(url);
-//     };
-//     img.src = url;
-//     return canvas
-// }
 
 function make_thumbnail_svg(svg_string) {
     const this_slide_idx = slides.length - 1
@@ -291,61 +284,67 @@ function make_thumbnail_svg(svg_string) {
     return svg
 }
 
+function startSlides() {
+    createSlideLayout()
+    startSlide()
+}
+
 function finishSlides() {
     finishSlide()
     load(0)
 }
 
+function startSlide() {
+    slides.push({
+        frames: [],
+        finished: false
+    })
+}
+
 function finishSlide() {
     if (slides.length == 0)
         return
-    // get last entry
-    const svg_string = trace[trace.length - 1].slide
-    make_thumbnail_svg(svg_string)
+    if (slides[slides.length - 1].finished)
+        return
+    frame() // add the last frame to the slide
+    make_thumbnail_svg(save_slide())
+    slides[slides.length - 1].finished = true
 }
 
 function slide() {
     finishSlide()
-    const svg_string = save_slide()
-
-    trace.push({
-        type: "slide",
-        slide: svg_string
-    })
-    frames.push(trace.length - 1)
-    slides.push(frames.length - 1)
+    startSlide()
 }
 
 function frame() {
-    const svg_string = save_slide()
-    // make_thumbnail_svg(svg_string)
-
-    trace.push({
-        type: "frame",
-        slide: svg_string
+    const slide = slides[slides.length - 1]
+    console.log(`slide ${slides.length - 1} frame ${slide.frames.length}`)
+    slide.frames.push({
+        slide: save_slide(),
+        anims: []
     })
-    frames.push(trace.length - 1)
 }
 
-function afterPrevious(animation) {
+function withPrevious(animation) {
     return animate(animation, false)
 }
+function afterPrevious(animation) {
+    return animate(animation, true)
+}
 function onClick(animation) {
+    frame()
     return animate(animation, true)
 }
 
-function animate(animation, clickToStart = false) {
-    if (clickToStart) {
-        frame()
-        // frame()
-    }
-    // deepcopy state
-    const state_copy = save_state()
-    const slide_copy = save_slide()
-    trace.push({
+function animate(animation, block = true) {
+    const slide = slides[slides.length - 1]
+    const f = slide.frames[slide.frames.length - 1]
+    f.anims.push({
         type: "animate",
-        slide: slide_copy,
-        state: state_copy,
+        slide: save_slide(),
+        slide_end: undefined,
+        state:  save_state(),
+        block: block,
         anim: animation
     })
     if (config.tracing_animation)
@@ -353,21 +352,5 @@ function animate(animation, clickToStart = false) {
     config.tracing_animation = true
     animation()
     config.tracing_animation = false
+    f.anims[f.anims.length - 1].slide_end = save_slide()
 }
-
-
-// function img_to_data_url(img_src, callback) {
-//     const canvas = document.createElement("canvas");
-//     const ctx = canvas.getContext('2d');
-//     const base_image = new Image();
-//     base_image.src = img_src;
-//     base_image.onload = function () {
-//         canvas.width = base_image.width;
-//         canvas.height = base_image.height;
-//         ctx.drawImage(base_image, 0, 0);
-//         const url = canvas.toDataURL(); // makes a png data url
-//         callback(url);
-//         canvas.remove();
-//     }
-// }
-
