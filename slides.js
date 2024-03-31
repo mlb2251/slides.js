@@ -14,8 +14,10 @@ let config = {
 let state = {}
 const anim_queue = []
 const trace = []
-const trace_idx_of_slide_idx = []
+const frames = []
+const slides = []
 let slide_idx = 0
+let frame_idx = 0
 let trace_idx = 0
 let anim_interval = undefined
 
@@ -178,7 +180,7 @@ function slidenum() {
     select("#slidenum").remove()
     select("svg").append("text")
         .attr("id", "slidenum")
-        .text(`Slide ${slide_idx} / Trace ${trace_idx}`)
+        .text(`Slide ${slide_idx} / Frame ${frame_idx} / Trace ${trace_idx}`)
         .attr("x", WIDTH - 20)
         .attr("y", 35)
         .attr("text-anchor", "end")
@@ -186,14 +188,15 @@ function slidenum() {
 }
 
 function load(i) {
-    if (i >= trace_idx_of_slide_idx.length)
+    if (i >= slides.length)
         return
     slide_idx = i
-    trace_idx = trace_idx_of_slide_idx[i]
+    load_frame(slides[slide_idx])
+}
 
-    // note than an interrupt() before remove() won't actually do anything because it won't have a chance to run the
-    // interrupt handler before the element is removed... sortof i think.
-    // active_transitions = 0
+function load_frame(i) {
+    frame_idx = i
+    trace_idx = frames[i]
     load_slide(trace[trace_idx])
     slidenum()
     anim_interval = setInterval(run_anim_if_ready, 50)
@@ -217,13 +220,13 @@ function load_state(s) {
     state = structuredClone(s)
 }
 
-function next() {
-    if (slide_idx < trace_idx_of_slide_idx.length - 1)
-        load(slide_idx + 1)
+function next_frame() {
+    if (frame_idx < frames.length - 1)
+        load_frame(frame_idx + 1)
 }
-function prev() {
-    if (slide_idx > 0)
-        load(slide_idx - 1)
+function prev_frame() {
+    if (frame_idx > 0)
+        load_frame(frame_idx - 1)
 }
 
 function run_anim_if_ready() {
@@ -243,39 +246,39 @@ function run_anim_if_ready() {
 
 d3.select("body").on("keydown", function (e) {
     if (e.key === "ArrowRight") {
-        next()
+        next_frame()
     }
     if (e.key === "ArrowLeft") {
-        prev()
+        prev_frame()
     }
 })
 
-function make_thumbnail_canvas(svg_string) {
-    const this_slide_idx = trace_idx_of_slide_idx.length
-    const canvas = d3.select("#thumbnails").append("canvas")
-        .classed("thumbnail", true)
-        .attr("width", THUMBNAIL_WIDTH)
-        .attr("height", THUMBNAIL_HEIGHT)
-        .attr("style", "margin: 1px")
-        .on("click", function () {
-            load(this_slide_idx)
-        })
+// function make_thumbnail_canvas(svg_string) {
+//     const this_frame_idx = frames.length
+//     const canvas = d3.select("#thumbnails").append("canvas")
+//         .classed("thumbnail", true)
+//         .attr("width", THUMBNAIL_WIDTH)
+//         .attr("height", THUMBNAIL_HEIGHT)
+//         .attr("style", "margin: 1px")
+//         .on("click", function () {
+//             load(this_frame_idx)
+//         })
     
-    const ctx = canvas.node().getContext("2d")
-    const DOMURL = self.URL || self.webkitURL || self;
-    const svg = new Blob([svg_string], { type: "image/svg+xml;charset=utf-8" });
-    const url = DOMURL.createObjectURL(svg)
-    const img = new Image();
-    img.onload = function () {
-        ctx.drawImage(img, 0, 0, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
-        DOMURL.revokeObjectURL(url);
-    };
-    img.src = url;
-    return canvas
-}
+//     const ctx = canvas.node().getContext("2d")
+//     const DOMURL = self.URL || self.webkitURL || self;
+//     const svg = new Blob([svg_string], { type: "image/svg+xml;charset=utf-8" });
+//     const url = DOMURL.createObjectURL(svg)
+//     const img = new Image();
+//     img.onload = function () {
+//         ctx.drawImage(img, 0, 0, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
+//         DOMURL.revokeObjectURL(url);
+//     };
+//     img.src = url;
+//     return canvas
+// }
 
 function make_thumbnail_svg(svg_string) {
-    const this_slide_idx = trace_idx_of_slide_idx.length
+    const this_slide_idx = slides.length - 1
 
     const svg = new DOMParser().parseFromString(svg_string, "image/svg+xml").documentElement;
     d3.select(svg)
@@ -288,16 +291,40 @@ function make_thumbnail_svg(svg_string) {
     return svg
 }
 
+function finishSlides() {
+    finishSlide()
+    load(0)
+}
+
+function finishSlide() {
+    if (slides.length == 0)
+        return
+    // get last entry
+    const svg_string = trace[trace.length - 1].slide
+    make_thumbnail_svg(svg_string)
+}
+
+function slide() {
+    finishSlide()
+    const svg_string = save_slide()
+
+    trace.push({
+        type: "slide",
+        slide: svg_string
+    })
+    frames.push(trace.length - 1)
+    slides.push(frames.length - 1)
+}
 
 function frame() {
     const svg_string = save_slide()
-    const thumbnail = make_thumbnail_svg(svg_string)
+    // make_thumbnail_svg(svg_string)
 
     trace.push({
         type: "frame",
         slide: svg_string
     })
-    trace_idx_of_slide_idx.push(trace.length - 1)
+    frames.push(trace.length - 1)
 }
 
 function afterPrevious(animation) {
