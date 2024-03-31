@@ -25,6 +25,10 @@ function select(path) {
     return slide_container.select(path)
 }
 
+function clearSlide() {
+    getForeground().selectAll("*").remove()
+}
+
 function append(type) {
     // parse up to first space (or end of string)
     const entries = type.split(" ")
@@ -311,14 +315,19 @@ function finishSlide() {
     slides[slides.length - 1].finished = true
 }
 
-function slide() {
+function newSlide() {
+    finishSlide()
+    clearSlide()
+    startSlide()
+}
+
+function sameSlide() {
     finishSlide()
     startSlide()
 }
 
 function frame() {
     const slide = slides[slides.length - 1]
-    console.log(`slide ${slides.length - 1} frame ${slide.frames.length}`)
     slide.frames.push({
         slide: save_slide(),
         anims: []
@@ -332,6 +341,7 @@ function afterPrevious(animation) {
     return animate(animation, true)
 }
 function onClick(animation) {
+    frame()
     frame()
     return animate(animation, true)
 }
