@@ -9,6 +9,7 @@ const THUMBNAIL_HEIGHT = THUMBNAIL_WIDTH * aspect_ratio
 let slide_container = undefined
 let active_transitions = 0
 let config = {
+    running_animation: false,
     tracing_animation: false,
 }
 let state = {}
@@ -29,21 +30,43 @@ function clearSlide() {
     getForeground().selectAll("*").remove()
 }
 
-function append(type) {
-    // parse up to first space (or end of string)
-    const entries = type.split(" ")
-    const name = entries[0]
-    const new_selection = getForeground().append(name)
-    entries.slice(1).forEach(entry => {
+// for a selection (or transition)
+function apply_attrs(selection, attrs) {
+    for (const entry of attrs) {
         if (entry[0] == "#") {
-            new_selection.attr("id", entry.slice(1))
-        } else {
+            selection.attr("id", entry.slice(1))
+        } else if (entry[0] == ".") {
+            selection.classed(entry.slice(1), true)
+        } else if (entry.includes("=")) {
             const [key, value] = entry.split("=")
-            new_selection.attr(key, value)    
+            if (key == "duration")
+                selection.duration(value)
+            else if (key == "delay")
+                selection.delay(value)
+            else 
+                selection.attr(key, value)
+        } else if (entry.includes(":")) {
+            const [key, value] = entry.split(":")
+            selection.style(key, value)
+        } else if (entry.length == 0) {
+            // pass
+        } else {
+            throw Error("Unknown entry: " + entry)
         }
-    })
+    }
+    return selection
+}
 
-    return new_selection
+function append(type) {
+    const attrs = type.split(" ")
+    const new_selection = getForeground().append(attrs[0])
+    return apply_attrs(new_selection, attrs.slice(1))
+}
+
+function insert(type, before) {
+    const attrs = type.split(" ")
+    const new_selection = getForeground().insert(attrs[0], before)
+    return apply_attrs(new_selection, attrs.slice(1))
 }
 
 function getSlide() {
@@ -57,7 +80,7 @@ function createSlideLayout() {
     const columns = document.createElement("div");
     columns.setAttribute("id", "columns");
     document.body.appendChild(columns);
-    
+
     const thumbnails = document.createElement("div");
     thumbnails.setAttribute("id", "thumbnails");
     columns.appendChild(thumbnails);
@@ -90,6 +113,23 @@ function createSlideLayout() {
     textarea.setAttribute("id", "notes-textarea");
     notes.appendChild(textarea);
 
+    const save_as_pdf = document.createElement("button");
+    save_as_pdf.setAttribute("id", "save-as-pdf");
+    save_as_pdf.textContent = "Save as PDF"
+    save_as_pdf.onclick = () => {
+        const doc = new jspdf.jsPDF();
+
+        for (const slide of slides) {
+            for (const frame of slide.frames) {
+                doc.addSvgAsImage(frame.slide, 0, 0, WIDTH, HEIGHT);
+                // doc.addImage(frame.slide, 'PNG', 15, 40, 180, 160);
+            }
+        }
+
+        doc.text("Hello world!", 10, 10);
+        doc.save("a4.pdf");
+    }
+    slides_with_notes.appendChild(save_as_pdf);
 
     slide_container = d3.select(div_slide_container)
     override_selections()
@@ -99,20 +139,129 @@ function createSlideLayout() {
 
 
 function override_selections() {
-    d3.select().__proto__.bbox = function (callback) {
+
+    d3.select().__proto__.x = function () {
+        return this.bbox().x
+    }
+    d3.select().__proto__.y = function () {
+        return this.bbox().y
+    }
+    d3.select().__proto__.width = function () {
+        return this.bbox().width
+    }
+    d3.select().__proto__.height = function () {
+        return this.bbox().height
+    }
+    d3.select().__proto__.bottom = function () {
+        return this.bbox().bottom
+    }
+    d3.select().__proto__.right = function () {
+        return this.bbox().right
+    }
+    d3.select().__proto__.midx = function () {
+        return this.bbox().midx
+    }
+    d3.select().__proto__.midy = function () {
+        return this.bbox().midy
+    }
+
+    const append_old = d3.select().__proto__.append
+    d3.select().__proto__.append = function (path) {
+        const attrs = path.split(" ")
+        const new_selection = append_old.bind(this)(attrs[0])
+        return apply_attrs(new_selection, attrs.slice(1))
+    }
+
+    const insert_old = d3.select().__proto__.insert
+    d3.select().__proto__.insert = function (path, before) {
+        const attrs = path.split(" ")
+        const new_selection = insert_old.bind(this)(attrs[0], before)
+        return apply_attrs(new_selection, attrs.slice(1))
+    }
+
+    const text_old = d3.select().__proto__.text
+    d3.select().__proto__.text = function (str, spacing = 1.5) {
+        // behavior on tspans
+        if (this.node().nodeName == "tspan")
+            return text_old.bind(this)(str)
+        
+        // behavior on text elems
+        this.selectAll("tspan").remove()
+        this.append_text(str, spacing)
+        return this
+    }
+
+    d3.select().__proto__.append_text = function (str, spacing = 1.5) {
+        str = str.replace(/ /g, "\u00A0")
+        str = str.replace(/\t/g, "\u00A0\u00A0\u00A0\u00A0")
+        for (const line of str.split("\n")) {
+            this.append("tspan").text(line)
+                .attr("x", this.attr("x"))
+                .attr("dy", spacing * this.attr("font-size"))
+        }
+        return this
+    }
+    d3.select().__proto__.tspans = function () {
+        return this.selectAll("tspan")
+    }
+    d3.select().__proto__.get = function (idx) {
+        return d3.select(this.nodes()[idx])
+    }
+    d3.select().__proto__.slice = function (...args) {
+        return d3.select(this.nodes.slice(...args))
+    }
+    d3.select().__proto__.last = function (...args) {
+        return d3.select(this.nodes()[this.nodes().length - 1])
+    }
+
+
+    d3.select().__proto__.bbox = function (callback, margin = 0) {
+        const bbox = this.node().getBBox()
+        // check if margin is a number
+
+        bbox.bottom = bbox.y + bbox.height
+        bbox.right = bbox.x + bbox.width
+        bbox.midx = bbox.x + bbox.width / 2
+        bbox.midy = bbox.y + bbox.height / 2
+
+        if (typeof margin === 'number' && margin != 0) {
+            bbox.x -= margin
+            bbox.y -= margin
+            bbox.width += 2 * margin
+            bbox.height += 2 * margin
+        } else {
+            bbox.x -= margin.left || 0
+            bbox.y -= margin.top || 0
+            bbox.width += (margin.left || 0) + (margin.right || 0)
+            bbox.height += (margin.top || 0) + (margin.bottom || 0)
+        }
         if (!callback)
-            return this.node().getBBox()
-        callback(this.node().getBBox())
+            return bbox
+        return callback(bbox)
     }
 }
+function bbox_xy(bbox) {
+    return `x=${bbox.x} y=${bbox.y}`
+}
+function bbox_wh(bbox) {
+    return `width=${bbox.width} height=${bbox.height}`
+}
+function bbox_xywh(bbox) {
+    return `x=${bbox.x} y=${bbox.y} width=${bbox.width} height=${bbox.height}`
+}
+
 
 // override how transitions work
 function override_transitions() {
     const transition_old = d3.select().__proto__.transition
-    d3.select().__proto__.transition = function (name) {
+    d3.select().__proto__.transition = function (name, attrs="") {
+        attrs = attrs.split(" ")
         const t = transition_old.bind(this)(name)
         t.attr_targets = {}
         t.style_targets = {}
+
+        apply_attrs(t, attrs)
+
         t.on("start", function (d, i, nodes) {
             active_transitions += 1
             // console.log("active transitions: ", active_transitions)
@@ -201,14 +350,14 @@ function load(slide, frame = 0, no_anim = false) {
 
     if (no_anim && f.anims.length != 0) {
         // show the very last frame
-        anim_idx = f.anims.length-1
+        anim_idx = f.anims.length - 1
         restore_slide(f.anims[anim_idx].slide_end)
     } else {
         // show the first frame, and launch the anims
         restore_slide(f.slide)
         if (f.anims.length != 0) {
             anim_interval = setInterval(run_anim_if_ready, 50)
-            run_anim_if_ready()  
+            run_anim_if_ready()
         }
     }
     slidenum()
@@ -262,7 +411,9 @@ function run_anim_if_ready() {
     anim_idx += 1
     slidenum()
     state = restore_state(next_anim.state)
+    config.running_animation = true
     next_anim.anim()
+    config.running_animation = false
 }
 
 d3.select("body").on("keydown", function (e) {
@@ -353,7 +504,7 @@ function animate(animation, block = true) {
         type: "animate",
         slide: save_slide(),
         slide_end: undefined,
-        state:  save_state(),
+        state: save_state(),
         block: block,
         anim: animation
     })
