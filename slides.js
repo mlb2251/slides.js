@@ -369,6 +369,7 @@ function restore_slide(svg_string) {
     select("svg").remove()
     let new_active_slide = new DOMParser().parseFromString(svg_string, "image/svg+xml").documentElement;
     getSlide().node().appendChild(new_active_slide)
+    save_to_url()
     // curr_slide = entry.slide.clone(true).style("display", null).attr("id", "active-slide") // make it visible again
 }
 function save_slide() {
@@ -381,6 +382,17 @@ function save_state() {
 }
 function restore_state(s) {
     state = structuredClone(s)
+}
+
+function save_to_url() {
+    window.history.replaceState({}, '', `${window.location.pathname}?slide=${slide_idx}&frame=${frame_idx}&anim=${anim_idx}`);
+}
+function load_from_url() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const slide = urlParams.get('slide') || 0;
+    const frame = urlParams.get('frame') || 0;
+    const anim = urlParams.get('anim') || 0;
+    load(slide, frame, anim)
 }
 
 function next_frame() {
@@ -448,7 +460,7 @@ function startSlides() {
 
 function finishSlides() {
     finishSlide()
-    load(0)
+    load_from_url()
 }
 
 function startSlide() {
