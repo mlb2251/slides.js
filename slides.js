@@ -194,25 +194,27 @@ function override_selections() {
     d3.select().__proto__.append_text = function (str, spacing = 1.5) {
         str = str.replace(/ /g, "\u00A0")
         str = str.replace(/\t/g, "\u00A0\u00A0\u00A0\u00A0")
+        let sel = d3.select()
         for (const line of str.split("\n")) {
-            this.append("tspan").text(line)
+            const tspan = this.append("tspan").text(line)
                 .attr("x", this.attr("x"))
                 .attr("dy", spacing * this.attr("font-size"))
+            sel = sel.merge(tspan)
         }
-        return this
+        return sel
     }
-    d3.select().__proto__.tspans = function () {
-        return this.selectAll("tspan")
-    }
-    d3.select().__proto__.get = function (idx) {
-        return d3.select(this.nodes()[idx])
-    }
-    d3.select().__proto__.slice = function (...args) {
-        return d3.select(this.nodes.slice(...args))
-    }
-    d3.select().__proto__.last = function (...args) {
-        return d3.select(this.nodes()[this.nodes().length - 1])
-    }
+    // d3.select().__proto__.tspans = function () {
+    //     return this.selectAll("tspan")
+    // }
+    // d3.select().__proto__.get = function (idx) {
+    //     return d3.select(this.nodes()[idx])
+    // }
+    // d3.select().__proto__.slice = function (...args) {
+    //     return d3.select(this.nodes.slice(...args))
+    // }
+    // d3.select().__proto__.last = function (...args) {
+    //     return d3.select(this.nodes()[this.nodes().length - 1])
+    // }
 
 
     d3.select().__proto__.bbox = function (callback, margin = 0) {
