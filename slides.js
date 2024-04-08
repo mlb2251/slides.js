@@ -3,8 +3,6 @@
 const aspect_ratio = 9 / 16
 const WIDTH = 1000 // 10.4 inches
 const HEIGHT = WIDTH * aspect_ratio
-const THUMBNAIL_WIDTH = 200
-const THUMBNAIL_HEIGHT = THUMBNAIL_WIDTH * aspect_ratio
 
 let slide_container = undefined
 let active_transitions = 0
@@ -21,6 +19,7 @@ let slide_idx = 0
 let frame_idx = 0
 let anim_idx = 0
 let anim_interval = undefined
+let slide_mode = "view"
 
 function select(path) {
     return slide_container.select(path)
@@ -28,6 +27,11 @@ function select(path) {
 
 function clearSlide() {
     getForeground().selectAll("*").remove()
+    getForeground().append("rect")
+        .style("fill", "none")
+        .style("stroke", "none")
+        .attr("width", WIDTH)
+        .attr("height", HEIGHT)
 }
 
 // for a selection (or transition)
@@ -43,6 +47,10 @@ function apply_attrs(selection, attrs) {
                 selection.duration(value)
             else if (key == "delay")
                 selection.delay(value)
+            else if (key == "wx")
+                selection.attr("x", WIDTH * value)
+            else if (key == "wy")
+                selection.attr("y", HEIGHT * value)
             else 
                 selection.attr(key, value)
         } else if (entry.includes(":")) {
@@ -75,6 +83,7 @@ function getSlide() {
 
 const getBackground = () => select("#slide-background")
 const getForeground = () => select("#slide-foreground")
+const getDefs = () => select("#defs")
 
 function createSlideLayout() {
     const columns = document.createElement("div");
@@ -96,22 +105,27 @@ function createSlideLayout() {
     const svg = d3.select(div_slide_container).append("svg")
         .attr("viewBox", `0 0 ${WIDTH} ${HEIGHT}`)
 
+    svg.append("defs").attr("id", "defs")
+
     const active_slide = svg.append("g")
         .attr("id", "active-slide")
+
     active_slide.append("rect")
         .attr("id", "slide-background")
         .attr("width", WIDTH)
         .attr("height", HEIGHT)
-    active_slide.append("g")
+    const fg = active_slide.append("g")
         .attr("id", "slide-foreground")
+
+    // d3.select("defs").append("marker")
 
     const notes = document.createElement("div");
     notes.setAttribute("id", "notes");
     slides_with_notes.appendChild(notes);
 
-    const textarea = document.createElement("textarea");
-    textarea.setAttribute("id", "notes-textarea");
-    notes.appendChild(textarea);
+    // const textarea = document.createElement("textarea");
+    // textarea.setAttribute("id", "notes-textarea");
+    // notes.appendChild(textarea);
 
     const save_as_pdf = document.createElement("button");
     save_as_pdf.setAttribute("id", "save-as-pdf");
@@ -195,10 +209,11 @@ function override_selections() {
         str = str.replace(/ /g, "\u00A0")
         str = str.replace(/\t/g, "\u00A0\u00A0\u00A0\u00A0")
         let sel = d3.select()
+        const fontsize = this.attr("font-size") // || this.style("font-size")
         for (const line of str.split("\n")) {
             const tspan = this.append("tspan").text(line)
                 .attr("x", this.attr("x"))
-                .attr("dy", spacing * this.attr("font-size"))
+                .attr("dy", spacing * fontsize)
             sel = sel.merge(tspan)
         }
         return sel
@@ -347,6 +362,7 @@ function load(slide, frame = 0, no_anim = false) {
     clearInterval(anim_interval)
     slide_idx = slide
     frame_idx = frame
+    // console.log(`load slide ${slide_idx}, frame ${frame_idx}`)
     const f = slides[slide_idx].frames[frame_idx]
     anim_idx = 0
 
@@ -370,6 +386,8 @@ function restore_slide(svg_string) {
     let new_active_slide = new DOMParser().parseFromString(svg_string, "image/svg+xml").documentElement;
     getSlide().node().appendChild(new_active_slide)
     save_to_url()
+    d3.selectAll(".thumbnail").classed("selected-thumbnail", false)
+    d3.select(d3.selectAll(".thumbnail").nodes()[slide_idx]).classed("selected-thumbnail", true)
     // curr_slide = entry.slide.clone(true).style("display", null).attr("id", "active-slide") // make it visible again
 }
 function save_slide() {
@@ -385,27 +403,35 @@ function restore_state(s) {
 }
 
 function save_to_url() {
-    window.history.replaceState({}, '', `${window.location.pathname}?slide=${slide_idx}&frame=${frame_idx}&anim=${anim_idx}`);
+    window.history.replaceState({}, '', `${window.location.pathname}?mode=${slide_mode}&slide=${slide_idx}&frame=${frame_idx}&anim=${anim_idx}`);
 }
 function load_from_url() {
     const urlParams = new URLSearchParams(window.location.search);
     const slide = urlParams.get('slide') || 0;
     const frame = urlParams.get('frame') || 0;
     const anim = urlParams.get('anim') || 0;
-    load(slide, frame, anim)
+    slide_mode = urlParams.get('mode') || "view";
+    load(Number(slide), Number(frame), Number(anim))
+}
+
+function next_slide() {
+    if (slide_idx < slides.length - 1)
+        return load(slide_idx + 1, 0) // load next slide
+}
+function prev_slide() {
+    if (slide_idx > 0)
+        return load(slide_idx - 1, slides[slide_idx - 1].frames.length - 1, true) // load previous slide
 }
 
 function next_frame() {
     if (frame_idx < slides[slide_idx].frames.length - 1)
         return load(slide_idx, frame_idx + 1) // load next frame
-    if (slide_idx < slides.length - 1)
-        return load(slide_idx + 1, 0) // load next slide
+    next_slide()
 }
 function prev_frame() {
     if (frame_idx > 0)
         return load(slide_idx, frame_idx - 1, true) // load previous frame
-    if (slide_idx > 0)
-        return load(slide_idx - 1, slides[slide_idx - 1].frames.length - 1, true) // load previous slide
+    prev_slide()
 }
 
 function run_anim_if_ready() {
@@ -436,6 +462,12 @@ d3.select("body").on("keydown", function (e) {
     }
     if (e.key === "ArrowLeft") {
         prev_frame()
+    }
+    if (e.key === "ArrowDown") {
+        next_slide()
+    }
+    if (e.key === "ArrowUp") {
+        prev_slide()
     }
 })
 
@@ -493,6 +525,7 @@ function sameSlide() {
 
 function frame() {
     const slide = slides[slides.length - 1]
+    // console.log(`making slide ${slides.length-1} frame ${slide.frames.length}`)
     slide.frames.push({
         slide: save_slide(),
         anims: []
@@ -529,3 +562,163 @@ function animate(animation, block = true) {
     config.tracing_animation = false
     f.anims[f.anims.length - 1].slide_end = save_slide()
 }
+
+class Cursor {
+    constructor() {
+        this._x = 0
+        this._y = 0
+        this.group = getForeground()
+        this.elem = this.group
+        this.history = []
+    }
+    copy() {
+        const c = new Cursor()
+        c._x = this._x
+        c._y = this._y
+        c.group = this.group
+        c.elem = this.elem
+        c.history = this.history.slice()
+        return c
+    }
+    bbox(relative) {
+        const bbox = this.elem.node().getBBox()
+        return bbox
+        // if (relative == undefined)
+        //     return bbox
+        // return {
+        //     x: bbox.x + this._x,
+        //     y: bbox.y + this._y,
+        //     width: bbox.width,
+        //     height: bbox.height
+        // }
+    }
+    gbbox() {
+        return this.group.node().getBBox()
+    }
+    wx(x) {
+        this._x = WIDTH * x
+        return this
+    }
+    wy(y) {
+        this._y = HEIGHT * y
+        return this
+    }
+    x(frac) {
+        if (typeof frac == "object") {
+            this._x = frac._x
+            return this
+        }
+        this._x = this.bbox().x + frac * this.bbox().width
+        return this
+    }
+    y(frac) {
+        if (typeof frac == "object") {
+            this._y = frac._y
+            return this
+        }
+        this._y = this.bbox().y + frac * this.bbox().height
+        return this
+    }
+    dx(val) {
+        this._x += val
+        return this
+    }
+    dy(val) {
+        this._y += val
+        return this
+    }
+    gx(frac) {
+        // this._x = this.gbbox.x + frac * this.gbbox.width
+        this._x = frac * this.gbbox().width
+        return this
+    }
+    gy(frac) {
+        // this._y = this.gbbox.y + frac * this.gbbox.height
+        this._y = frac * this.gbbox().height
+        return this
+    }
+    // select(str) {
+    //     const selection = this.group.select(str)
+    //     this.groups.push(selection)
+    //     this.elem = selection
+    // }
+    append(str) {
+        const tokens = str.split(" ")
+        const typename = tokens[0]
+        const attrs = tokens.slice(1)
+        this.elem = this.group.append(typename)
+        this.elem.attr("x", this._x)
+        this.elem.attr("y", this._y)
+        apply_attrs(this.elem, attrs)
+        return this
+    }
+    // set_elem_pos() {
+    //     const tag = this.elem.node().tagName.toLowerCase()
+    // }
+    text(str) {
+        this.append("text")
+        this.elem.text(str)
+        return this.x(1)
+    }
+    textln(str) {
+        return this.text(str).x(0).y(1.5)
+    }
+    set(str) {
+        apply_attrs(this.elem, str.split(" "))
+        return this
+    }
+    push() {
+        this.history.push([this._x, this._y, this.group])
+        // console.log(this.history[0][2])
+        this.group = this.group.append("g")
+        this.group.attr("transform", `translate(${this._x},${this._y})`)
+        this.elem = this.group
+        this._x = 0
+        this._y = 0
+        return this
+    }
+    pop() {
+        this.elem = this.group
+        const prev = this.history.pop()
+        this._x = prev[0]
+        this._y = prev[1]
+        this.group = prev[2]
+        return this
+    }
+    frame() {
+        const gbbox = bbox_abs(this.group)
+        const g_rect = getForeground().append("rect")
+            .attr("x", gbbox.x).attr("y", gbbox.y)
+            .attr("width", gbbox.width).attr("height", gbbox.height)
+            .attr("fill", "green").style("opacity", 0.2)
+        
+        const bbox = bbox_abs(this.elem)
+        const elem_rect = getForeground().append("rect")
+            .attr("x", bbox.x).attr("y", bbox.y)
+            .attr("width", bbox.width).attr("height", bbox.height)
+            .attr("fill", "red").style("opacity", 0.2)
+
+        const circle = this.group.append("circle").attr("cx", this._x).attr("cy", this._y).attr("r", 5).attr("fill", "red")
+        frame()
+        circle.remove()
+        elem_rect.remove()
+        g_rect.remove()
+    }
+}
+const C = () => new Cursor()
+
+
+/// bbox relative to svg element
+function bbox_abs(sel) {
+    const svg_client = select("svg").node().getBoundingClientRect()
+    const sel_client = sel.node().getBoundingClientRect()
+    const bbox = sel.node().getBBox()
+    const scaling = WIDTH / svg_client.width
+    return {
+        x: (sel_client.x - svg_client.x) * scaling,
+        y: (sel_client.y - svg_client.y) * scaling,
+        width: bbox.width,
+        height: bbox.height
+    }
+}
+
