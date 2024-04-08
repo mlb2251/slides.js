@@ -117,6 +117,14 @@ function createSlideLayout() {
     const fg = active_slide.append("g")
         .attr("id", "slide-foreground")
 
+    d3.select(div_slide_container).on("click", function (e) {
+        const [x, y] = d3.pointer(e, getForeground().node())
+        // getForeground().append(`circle cx=${x} cy=${y} r=10 fill=red`)
+        const wx = (x / WIDTH).toFixed(2)
+        const wy = (y / HEIGHT).toFixed(2)
+        navigator.clipboard.writeText(`c.wx(${wx}).wy(${wy})`);
+    })
+
     // d3.select("defs").append("marker")
 
     const notes = document.createElement("div");
@@ -570,6 +578,8 @@ class Cursor {
         this.group = getForeground()
         this.elem = this.group
         this.history = []
+        this.presets = {}
+        this.keypoints = []
     }
     copy() {
         const c = new Cursor()
@@ -578,22 +588,16 @@ class Cursor {
         c.group = this.group
         c.elem = this.elem
         c.history = this.history.slice()
+        // c.begun = this.begun.map(x => x.slice())
+        c.presets = {...this.presets}
+        c.keypoints = this.keypoints.map(p => p.slice())
         return c
     }
-    bbox(relative) {
-        const bbox = this.elem.node().getBBox()
-        return bbox
-        // if (relative == undefined)
-        //     return bbox
-        // return {
-        //     x: bbox.x + this._x,
-        //     y: bbox.y + this._y,
-        //     width: bbox.width,
-        //     height: bbox.height
-        // }
+    bbox() {
+        return bbox_abs(this.elem)
     }
     gbbox() {
-        return this.group.node().getBBox()
+        return bbox_abs(this.group)
     }
     wx(x) {
         this._x = WIDTH * x
@@ -608,7 +612,8 @@ class Cursor {
             this._x = frac._x
             return this
         }
-        this._x = this.bbox().x + frac * this.bbox().width
+        const bbox = bbox_abs(this.elem)
+        this._x = bbox.x + frac * bbox.width
         return this
     }
     y(frac) {
@@ -616,7 +621,8 @@ class Cursor {
             this._y = frac._y
             return this
         }
-        this._y = this.bbox().y + frac * this.bbox().height
+        const bbox = bbox_abs(this.elem)
+        this._y = bbox.y + frac * bbox.height
         return this
     }
     dx(val) {
@@ -629,12 +635,22 @@ class Cursor {
     }
     gx(frac) {
         // this._x = this.gbbox.x + frac * this.gbbox.width
-        this._x = frac * this.gbbox().width
+        const bbox = bbox_abs(this.group)
+        this._x = bbox.x + frac * bbox.width
         return this
     }
     gy(frac) {
         // this._y = this.gbbox.y + frac * this.gbbox.height
-        this._y = frac * this.gbbox().height
+        const bbox = bbox_abs(this.group)
+        this._y = bbox.y + frac * bbox.height
+        return this
+    }
+    ax(x) {
+        this._x = x
+        return this
+    }
+    ay(y) {
+        this._y = y
         return this
     }
     // select(str) {
@@ -643,12 +659,20 @@ class Cursor {
     //     this.elem = selection
     // }
     append(str) {
+        // this.frame()
         const tokens = str.split(" ")
         const typename = tokens[0]
-        const attrs = tokens.slice(1)
+        const presets = (this.presets[typename] || "").split(" ")
+        const attrs = presets.concat(tokens.slice(1))
+        // if (this.group.node().getCTM().e != 0 || this.group.node().getCTM().f != 0)
+            // console.log("WARNING: group has non-zero translation when placing ", str, this.group.node().getCTM().f, this.group.node().getCTM().e)
+        let gctm = this.group.node().getCTM() // this is generally all 0s
         this.elem = this.group.append(typename)
-        this.elem.attr("x", this._x)
-        this.elem.attr("y", this._y)
+        this.elem.attr("transform", `translate(${this._x-gctm.e},${this._y-gctm.f})`)
+        // this.elem.attr("x", this._x-gctm.e)
+        // this.elem.attr("y",this._y-gctm.f)
+        // this.elem.attr("x", this._x)
+        // this.elem.attr("y", this._y)
         apply_attrs(this.elem, attrs)
         return this
     }
@@ -661,20 +685,63 @@ class Cursor {
         return this.x(1)
     }
     textln(str) {
-        return this.text(str).x(0).y(1.5)
+        return this.text(str).x(0).y(2)
+    }
+    rect(bbox) {
+        this._x = bbox.x
+        this._y = bbox.y
+        this.append(`rect ${bbox.wh()}`)
+        return this
+    }
+    keypoint() {
+        this.keypoints.push([this._x, this._y])
+        return this
+    }
+    arrow() {
+        const [x2, y2] = this.keypoints.pop()
+        const [x1, y1] = this.keypoints.pop()
+        this.ax(x1).ay(y1)
+        this.append("path")
+        this.elem.attr("d", `M 0 0 L ${x2-x1} ${y2-y1}`)
+        this.set("stroke=black stroke-width=2 marker-end=url(#arrowhead)")
+        return this
     }
     set(str) {
         apply_attrs(this.elem, str.split(" "))
         return this
     }
+    preset(type, str) {
+        this.presets[type] = (this.presets[type] || "") + " " + str
+        return this
+    }
+    unset(type) {
+        this.presets[type] = ""
+    }
+    call(fn, ...args) {
+        fn(this, ...args)
+        return this
+    }
+    right() {
+        return this.x(1)
+    }
+    left() {
+        return this.x(0)
+    }
+    top() {
+        return this.y(0)
+    }
+    bottom() {
+        return this.y(1)
+    }
+    middle() {
+        return this.x(.5).y(.5)
+    }
     push() {
         this.history.push([this._x, this._y, this.group])
-        // console.log(this.history[0][2])
+        // const gctm = this.group.node().getCTM()
         this.group = this.group.append("g")
-        this.group.attr("transform", `translate(${this._x},${this._y})`)
+        // this.group.attr("transform", `translate(${this._x-gctm.e},${this._y-gctm.f})`)
         this.elem = this.group
-        this._x = 0
-        this._y = 0
         return this
     }
     pop() {
@@ -690,15 +757,18 @@ class Cursor {
         const g_rect = getForeground().append("rect")
             .attr("x", gbbox.x).attr("y", gbbox.y)
             .attr("width", gbbox.width).attr("height", gbbox.height)
-            .attr("fill", "green").style("opacity", 0.2)
+            .attr("stroke", "blue").style("opacity", 0.5)
+            .attr("stroke-width", 4)
+            .attr("fill", "none")
         
         const bbox = bbox_abs(this.elem)
         const elem_rect = getForeground().append("rect")
             .attr("x", bbox.x).attr("y", bbox.y)
             .attr("width", bbox.width).attr("height", bbox.height)
-            .attr("fill", "red").style("opacity", 0.2)
+            .style("opacity", 0.2)
+            .attr("fill", "orange")
 
-        const circle = this.group.append("circle").attr("cx", this._x).attr("cy", this._y).attr("r", 5).attr("fill", "red")
+        const circle = getForeground().append("circle").attr("cx", this._x).attr("cy", this._y).attr("r", 5).attr("fill", "red")
         frame()
         circle.remove()
         elem_rect.remove()
@@ -712,13 +782,50 @@ const C = () => new Cursor()
 function bbox_abs(sel) {
     const svg_client = select("svg").node().getBoundingClientRect()
     const sel_client = sel.node().getBoundingClientRect()
-    const bbox = sel.node().getBBox()
     const scaling = WIDTH / svg_client.width
-    return {
-        x: (sel_client.x - svg_client.x) * scaling,
-        y: (sel_client.y - svg_client.y) * scaling,
-        width: bbox.width,
-        height: bbox.height
+    return new BBox(
+        (sel_client.x - svg_client.x) * scaling,
+        (sel_client.y - svg_client.y) * scaling,
+        (sel_client.right - sel_client.x) * scaling,
+        (sel_client.bottom - sel_client.y) * scaling
+    )
+}
+
+class BBox {
+    constructor(x, y, width, height) {
+        this.x = x
+        this.y = y
+        this.width = width
+        this.height = height
+        this.bottom = y + height
+        this.right = x + width
     }
+    margin(margin) {
+        // is margin an object?
+        if (typeof margin === 'object') {
+            return new BBox(
+                this.x - (margin.left || 0),
+                this.y - (margin.top || 0),
+                this.width + (margin.left || 0) + (margin.right || 0),
+                this.height + (margin.top || 0) + (margin.bottom || 0)
+            )
+        }
+        return new BBox(
+            this.x - margin,
+            this.y - margin,
+            this.width + 2 * margin,
+            this.height + 2 * margin
+        )
+    }
+    xy() {
+        return `x=${this.x} y=${this.y}`
+    }
+    wh() {
+        return `width=${this.width} height=${this.height}`
+    }
+    xywh() {
+        return `x=${this.x} y=${this.y} width=${this.width} height=${this.height}`
+    }
+
 }
 
